@@ -22,6 +22,10 @@ class PersonalReader extends StatefulWidget {
 
   @override
   State<PersonalReader> createState() => _PersonalReaderState();
+
+  static _PersonalReaderState? of(BuildContext context) {
+    return context.findAncestorStateOfType<_PersonalReaderState>();
+  }
 }
 
 class _PersonalReaderState extends State<PersonalReader> {
@@ -33,7 +37,7 @@ class _PersonalReaderState extends State<PersonalReader> {
     _isDarkMode = widget.darkMode;
   }
 
-  void _toggleTheme() async {
+  void toggleTheme() async {
     setState(() {
       _isDarkMode = !_isDarkMode;
     });
@@ -70,7 +74,7 @@ class _PersonalReaderState extends State<PersonalReader> {
         ),
       ),
       themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
-      home: ReaderScreen(),
+      home: const ReaderScreen(),
     );
   }
 }

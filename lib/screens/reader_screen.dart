@@ -1,8 +1,21 @@
 import 'package:flutter/material.dart';
+import '../main.dart';
 import '../models/book.dart';
 import '../services/reading_service.dart';
 import '../widgets/book_selector.dart';
 import '../widgets/markdown_viewer.dart';
+
+class _TocItem {
+  final String title;
+  final int level;
+  final int lineIndex;
+
+  _TocItem({
+    required this.title,
+    required this.level,
+    required this.lineIndex,
+  });
+}
 
 class ReaderScreen extends StatefulWidget {
   final Book? initialBook;
@@ -21,6 +34,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _showSettings = false;
   double _readingProgress = 0.0;
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _tocScrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+  List<_TocItem> _tocItems = [];
+  List<_TocItem> _filteredTocItems = [];
 
   _ReaderScreenState() : _currentBook = Book.defaultBook;
 
@@ -35,7 +52,51 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _tocScrollController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _filterTocItems(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredTocItems = _tocItems;
+      } else {
+        _filteredTocItems = _tocItems
+            .where((item) => item.title.toLowerCase().contains(query.toLowerCase()))
+            .toList();
+      }
+    });
+  }
+
+  List<_TocItem> _extractTableOfContents(String content) {
+    final List<_TocItem> items = [];
+    final lines = content.split('\n');
+    
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.startsWith('#')) {
+        int level = 0;
+        int j = 0;
+        while (j < line.length && line[j] == '#') {
+          level++;
+          j++;
+        }
+        
+        if (level <= 6) {
+          final title = line.substring(level).trim();
+          if (title.isNotEmpty) {
+            items.add(_TocItem(
+              title: title,
+              level: level,
+              lineIndex: i,
+            ));
+          }
+        }
+      }
+    }
+    
+    return items;
   }
 
   Future<void> _loadSettings() async {
@@ -52,11 +113,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
     final content = await ReadingService.loadBookContent(_currentBook.filePath);
     final progress = await ReadingService.getProgress(_currentBook.id);
+    final toc = _extractTableOfContents(content);
 
     setState(() {
       _content = content;
       _isLoading = false;
       _readingProgress = progress;
+      _tocItems = toc;
+      _filteredTocItems = toc;
+      _searchController.clear();
     });
 
     // 恢复阅读位置
@@ -100,14 +165,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     ReadingService.saveFontSize(newFontSize);
   }
 
-  void _toggleTheme() async {
-    final currentTheme = Theme.of(context).brightness;
-    final newDarkMode = currentTheme == Brightness.light;
-    await ReadingService.saveDarkMode(newDarkMode);
-
-    // 简单重启应用来应用主题
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/');
+  void _toggleTheme() {
+    // 调用主应用的主题切换方法
+    final appState = PersonalReader.of(context);
+    if (appState != null) {
+      appState.toggleTheme();
     }
   }
 
@@ -166,23 +228,79 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 ? const Center(
                     child: CircularProgressIndicator(),
                   )
-                : Stack(
+                : Row(
                     children: [
-                      // Markdown 内容
-                      MarkdownViewer(
-                        content: _content,
-                        fontSize: _fontSize,
-                        scrollController: _scrollController,
-                        onScroll: _onScroll,
-                      ),
-
-                      // 设置面板
-                      if (_showSettings)
-                        Positioned(
-                          top: 16,
-                          right: 16,
-                          child: _buildSettingsPanel(),
+                      // 左侧目录栏
+                      if (_tocItems.isNotEmpty)
+                        Container(
+                          width: 200,
+                          decoration: BoxDecoration(
+                            border: Border(
+                              right: BorderSide(
+                                color: Theme.of(context).dividerColor,
+                              ),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              // 搜索框
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: TextField(
+                                  controller: _searchController,
+                                  decoration: InputDecoration(
+                                    hintText: '搜索目录',
+                                    prefixIcon: const Icon(Icons.search),
+                                    suffixIcon: _searchController.text.isNotEmpty
+                                        ? IconButton(
+                                            icon: const Icon(Icons.clear),
+                                            onPressed: () {
+                                              _searchController.clear();
+                                              _filterTocItems('');
+                                            },
+                                          )
+                                        : null,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                  onChanged: _filterTocItems,
+                                ),
+                              ),
+                              // 目录列表
+                              Expanded(
+                                child: _buildTableOfContents(),
+                              ),
+                            ],
+                          ),
                         ),
+
+                      // 右侧内容区域
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            // Markdown 内容
+                            MarkdownViewer(
+                              content: _content,
+                              fontSize: _fontSize,
+                              scrollController: _scrollController,
+                              onScroll: _onScroll,
+                            ),
+
+                            // 设置面板
+                            if (_showSettings)
+                              Positioned(
+                                top: 16,
+                                right: 16,
+                                child: _buildSettingsPanel(),
+                              ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
           ),
@@ -217,6 +335,53 @@ class _ReaderScreenState extends State<ReaderScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTableOfContents() {
+    final displayItems = _filteredTocItems.isEmpty ? _tocItems : _filteredTocItems;
+    
+    if (displayItems.isEmpty) {
+      return const Center(
+        child: Text('没有找到匹配的目录'),
+      );
+    }
+    
+    return ListView.builder(
+      controller: _tocScrollController,
+      itemCount: displayItems.length,
+      itemBuilder: (context, index) {
+        final item = displayItems[index];
+        final indent = (item.level - 1) * 12.0;
+        
+        return Padding(
+          padding: EdgeInsets.only(left: indent),
+          child: ListTile(
+            dense: true,
+            title: Text(
+              item.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: item.level == 1 ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            onTap: () {
+              // 滚动到对应位置
+              if (_scrollController.hasClients) {
+                // 简单估算：每行大约50像素
+                final offset = item.lineIndex * 50.0;
+                _scrollController.animateTo(
+                  offset,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
+              }
+            },
+          ),
+        );
+      },
     );
   }
 
